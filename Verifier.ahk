@@ -1,5 +1,5 @@
 ﻿/*
-本工具提取自      ： Adventure - 3.0.4
+本工具提取自      ： Adventure IDE - 3.0.4
 完整版默认编译器  ： MSVC2022_Mini
 默认编译器制作说明： MSVC2022 制作说明.txt
 
