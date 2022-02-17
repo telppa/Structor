@@ -835,7 +835,7 @@ ShowAbout() {
     Gui Main: +Disabled
     Gui About: New, -SysMenu OwnerMain
     Gui Color, White
-    Gui Add, Picture, x15 y16 w32 h32, %A_ScriptDir%\..\..\Icons\Structor.ico
+    Gui Add, Picture, x15 y16 w32 h32, %A_ScriptDir%\Icons\Structor.ico
     Gui Font, s12 c0x003399, Segoe UI
     Gui Add, Text, x56 y11 w120 h23 +0x200, %AppName%
     Gui Font, s9 cDefault, Segoe UI
