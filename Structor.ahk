@@ -5,6 +5,9 @@
 
 为实现工具便携性与使用傻瓜化，部分代码有修改，需自行对比原版。
 
+Original Version : https://www.autohotkey.com/boards/viewtopic.php?t=31711
+Modified Version : https://github.com/telppa/Structor
+
 */
 
 ; Structor - Structure Helper
@@ -20,7 +23,7 @@ SetBatchLines -1
 
 Global C
     , AppName := "Structor"
-    , Version := "1.0.1"
+    , Version := "1.2.1"
     , g_AppData := A_ScriptDir
     , StructSize32 := 0
     , StructSize64 := 0
@@ -40,16 +43,7 @@ Gui Add, Text, vLabel1 x11 y10 w606 h26 +0x200 +E0x200 +BackgroundTrans, %A_Spac
 Gui Font
 
 Gui Font, s10 c0x003399, Lucida Console
-Gui Add, Edit, vInput gEnableParse x11 y39 w605 h176, 
-(
-typedef struct tagMSLLHOOKSTRUCT {
-  POINT     pt;
-  DWORD     mouseData;
-  DWORD     flags;
-  DWORD     time;
-  ULONG_PTR dwExtraInfo;
-} MSLLHOOKSTRUCT, *LPMSLLHOOKSTRUCT, *PMSLLHOOKSTRUCT;
-)
+Gui Add, Edit, vInput gEnableParse x11 y39 w605 h176
 Gui Font
 
 Gui Font, s9, Segoe UI
@@ -80,7 +74,7 @@ Gui Add, Button, vBtnSettings gShowSettings x519 y476 w96 h24, &Settings...
 
 Gui Show, w627 h511, %AppName%
 
-GoSub EnableParse
+Test(113)
 
 If (CompilerPath32 == "" && CompilerPath64 == "") {
     GoSub ShowSettings
@@ -297,10 +291,10 @@ GenerateCode:
 
     } Else If (Chk32bit && Chk64bit) {
         If (ShortTernary || GetKeyState("Shift", "P")) {
-            Cap := "x64 := A_PtrSize == 8`r`n"
+            Cap := "x64 := (A_PtrSize == 8)`r`n"
             Condition := "x64 ? "
         } Else {
-            Condition := "A_PtrSize == 8 ? "
+            Condition := "(A_PtrSize == 8) ? "
         }
 
         StructSize := StructSize64 . " : " . StructSize32
@@ -316,7 +310,7 @@ GenerateCode:
     }
 
     If (StructSize) {
-        Cap .= "VarSetCapacity(" . StructName . ", " . Condition . StructSize . ", 0)"
+        Cap .= Format("VarSetCapacity({}, {}, 0)", StructName, Condition . StructSize)
     }
 
     Get := ""
@@ -344,27 +338,59 @@ GenerateCode:
         LV_GetText(Offset32, Row, 3)
         LV_GetText(Offset64, Row, 4)
 
-        fStr := False
+        fStr := False, ftype := ""
+
         If (FoundPos := InStr(Member, "[")) {
             Member := SubStr(Member, 1, FoundPos - 1)
-
-            If (DataType ~= "(W|T)CHAR") {
+            If (RegExMatch(DataType, "i)(TCHAR|WCHAR|wchar_t|CHAR)", fType))
                 fStr := True
+        }
 
-                If (Row == LV_GetCount()) {
-                    Length := (Offset64 != "") ? (StructSize64 - Offset64) : (StructSize32 - Offset32)
-                } Else {
-                    LV_GetText(NextOffset32, Row + 1, 3)
-                    LV_GetText(NextOffset64, Row + 1, 4)
-                    Length := (Offset64 != "") ? (NextOffset64 - Offset64) : (NextOffset32 - Offset32)
-                }
-                Length /= 2
+        AHKType := GetAHKType(DataType, Member, Row)
+        If (!InStr(AHKType, "=")) {  ; Add quotes.    int->"int"    (a=b)?c:d->(a=b)?c:d
+            AHKType := Format("""{}""", AHKType)
+            If (InStr(AHKType, "Str"))  ; Str AStr WStr
+                fStr := True
+        }
+
+        switch, fType
+        {
+            case "TCHAR"            : AHKType := """Str"""
+            case "CHAR"             : AHKType := """AStr"""
+            case "WCHAR", "wchar_t" : AHKType := """WStr"""
+        }
+
+        If (fStr) {
+            If (Row == LV_GetCount()) {
+                Length := (Offset64 != "") ? (StructSize64 - Offset64) : (StructSize32 - Offset32)
+            } Else {
+                LV_GetText(NextOffset32, Row + 1, 3)
+                LV_GetText(NextOffset64, Row + 1, 4)
+                Length := (Offset64 != "") ? (NextOffset64 - Offset64) : (NextOffset32 - Offset32)
+            }
+
+            ; If the type is Str(e.g. TCHAR), and you want to do compatibility for ansi and unicode.
+            ; The right way is to generate the structure twice by checked and no checked the checkbox-Unicode in Settings.
+            ; The ansi size calculated by unicode size is not accurate, that's why we should get the them by generating it twice.
+            Tips := ""
+            switch, Trim(AHKType, """")
+            {
+                case "Str": 
+                    Encoding := Unicode ? """UTF-16""" : """CP0"""
+                    Length   := Unicode ? Length//2 : Length
+                    Tips     := Unicode ? "  `; work on AutoHotkeyU32(U64).exe" : "  `; work on AutoHotkeyA32.exe"
+                case "AStr":
+                    Encoding := """CP0"""
+                    Length   := Length
+                case "WStr":
+                    Encoding := """UTF-16"""
+                    Length   //= 2
             }
         }
 
         u := (Offset32 == PrevOffset
           || Offset64 == PrevOffset
-          || (Chk32bit ? Offset32 : Offset64) < PrevOffset) ? ";" : "" ; Union
+          || (Chk32bit ? Offset32 : Offset64) < PrevOffset) ? "; " : "" ; Union
 
         If (Condition != "" && Offset32 != Offset64) {
             Offset := Condition . Offset64 . " : " . Offset32
@@ -381,11 +407,11 @@ GenerateCode:
             Loop Parse, Fields, `,
             {
                 If (fGet) {
-                    Get .= u . Prefix . A_LoopField . " := NumGet(" . StructName . ", " . Offset . ", ""Int"")`r`n"
+                    Get .= Format("{} := NumGet({}, {}, ""Int"")`r`n", u . Prefix . A_LoopField, StructName, Offset)
                 }
 
                 If (fPut) {
-                    Put .= u . "NumPut(" . Prefix . A_LoopField . ", " . StructName . ", " . Offset . ", ""Int"")`r`n"
+                    Put .= Format("{}NumPut({}, {}, {}, ""Int"")`r`n", u, Prefix . A_LoopField, StructName, Offset)
                 }
 
                 If (Condition != "" && Offset32 != Offset64) {
@@ -398,23 +424,22 @@ GenerateCode:
             Continue
         }
 
-        AHKType := GetAHKType(DataType, Member, Row)
+        If (InStr(Offset, ":"))
+            Offset := Format("({})", Offset)
 
         If (fGet) {
             If (fStr) {
-                InStr(Offset, ":") ? Offset := "(" . Offset . ")"
-                Get .= u . Member . " := StrGet(&" . StructName . " + " . Offset . ", " . Length . ", ""UTF-16"")`r`n"
+                Get .= Format("{} := StrGet(&{} + {}, {}, {}){}`r`n", u . Member, StructName, Offset, Length, Encoding, Tips)
             } Else {
-                Get .= u . Member . " := NumGet(" . StructName . ", " . Offset . ", """ . AHKType . """)`r`n"
+                Get .= Format("{} := NumGet({}, {}, {})`r`n", u . Member, StructName, Offset, AHKType)
             }
         }
 
         If (fPut) {
             If (fStr) {
-                InStr(Offset, ":") ? Offset := "(" . Offset . ")"
-                Put .= "StrPut(" . Member . ", &" . StructName . " + " . Offset . ", " . Length . ", ""UTF-16"")`r`n"
+                Put .= Format("{}StrPut({}, &{} + {}, {}, {}){}`r`n", u, Member, StructName, Offset, Length, Encoding, Tips)
             } Else {
-                Put .= u . "NumPut(" . Member . ", " . StructName ", " . Offset . ", """ . AHKType . """)`r`n"
+                Put .= Format("{}NumPut({}, {}, {}, {})`r`n", u, Member, StructName, Offset, AHKType)
             }
         }
 
@@ -438,19 +463,24 @@ GenerateCode:
 Return
 
 GetAHKType(DataType, Member, Row) {
+    ; You can get the following list of types by press F10 in "AHK DllCall Terminator".
+    ; https://www.autohotkey.com/boards/viewtopic.php?f=6&t=101795
     ; https://autohotkey.com/board/topic/25250-structparser-for-cc-structs/
-    Static Types = "Int,UInt,Ptr,UPtr,Short,UShort,Char,UChar,Int64,Float,Double"
-        , IntTypes = "int,INT,LONG,BOOL"
-        , UIntTypes = "unsigned int,unsigned long,UINT,ULONG,DWORD,COLORREF"
-        , PtrTypes = "HANDLE,HBITMAP,HBRUSH,HDC,HICON,HISTANCE,HMENU,HWND,LPARAM,WPARAM,INT_PTR,PUINT,PWSTR,PCWSTR"
-        , UPtrTypes = "UINT_PTR,ULONG_PTR,DWORD_PTR"
-        , ShortTypes = "short"
-        , UShortTypes = "unsigned short,WORD,ATOM,USHORT,WCHAR,TCHAR"
-        , CharTypes = "char"
-        , UCharTypes = "unsigned char,byte,BYTE,UCHAR"
-        , Int64Types = "int64,LONGLONG,ULONGLONG,DWORDLONG"
-        , FloatTypes = "FLOAT"
-        , DoubleTypes = "DOUBLE"
+    Static Types = "Int,UInt,Ptr,UPtr,Short,UShort,Char,UChar,Int64,Float,Double,Str,AStr,WStr"
+    , AStrTypes = "__nullterminated CONST CHAR*,CHAR*,CONST CHAR*,INT8*,LPCSTR,LPSTR,PCHAR,PCSTR,PINT8,PSTR"
+    , CharTypes = "CCHAR,char,INT8,signed char"
+    , DoubleTypes = "double"
+    , FloatTypes = "float"
+    , IntTypes = "BOOL,HFILE,HRESULT,int,INT32,long,LONG32,NTSTATUS,signed int"
+    , Int64Types = "__int64,DWORD64,DWORDLONG,INT64,LARGE_INTEGER,LONG64,LONGLONG,QWORD,signed __int64,UINT64,ULARGE_INTEGER,ULONG64,ULONGLONG,unsigned __int64,USN"
+    , PtrTypes = "__int3264,ADCONNECTION_HANDLE,CONST void*,HACCEL,HANDLE,HBITMAP,HBRUSH,HCOLORSPACE,HCONV,HCONVLIST,HCURSOR,HDC,HDDEDATA,HDESK,HDROP,HDWP,HENHMETAFILE,HFONT,HGDIOBJ,HGLOBAL,HHOOK,HICON,HINSTANCE,HKEY,HKL,HLOCAL,HMENU,HMETAFILE,HMODULE,HMONITOR,HPALETTE,HPEN,HRGN,HRSRC,HSZ,HWND,INT_PTR,LDAP_UDP_HANDLE,LONG_PTR,LPARAM,LPCVOID,LPVOID,LRESULT,PCONTEXT_HANDLE,PVOID,RPC_BINDING_HANDLE,SC_HANDLE,SC_LOCK,SERVICE_STATUS_HANDLE,SSIZE_T,void*,WINSTA"
+    , ShortTypes = "INT16,short,signed short"
+    , StrTypes = "LPCTSTR,LPTSTR,PCTSTR,PTCHAR,PTSTR,TCHAR*"
+    , UCharTypes = "BOOLEAN,BYTE,UCHAR,UINT8,unsigned char"
+    , UIntTypes = "ACCESS_MASK,COLORREF,DWORD,DWORD32,error_status_t,HCALL,LCID,LCTYPE,LGRPID,NET_API_STATUS,SECURITY_INFORMATION,TOKEN_MANDATORY_POLICY,UINT,UINT32,ULONG,ULONG32,unsigned int,unsigned long"
+    , UPtrTypes = "DWORD_PTR,SIZE_T,UINT_PTR,ULONG_PTR,unsigned __int3264,WPARAM"
+    , UShortTypes = "ATOM,LANGID,UINT16,UNICODE,unsigned short,USHORT,WCHAR,wchar_t,WORD"
+    , WStrTypes = "BSTR,CONST WCHAR*,const wchar_t*,LMCSTR,LMSTR,LPCWSTR,LPWORD,LPWSTR,PCWSTR,PUINT16,PUSHORT,PWCHAR,PWORD,PWSTR,UINT16*,USHORT*,WCHAR*,WORD*"
 
     Loop Parse, Types, `,
     {
@@ -461,6 +491,15 @@ GetAHKType(DataType, Member, Row) {
             Break
         }
     }
+
+    If (Type == "TBYTE")
+        Return "(A_IsUnicode) ? ""UShort"" : ""UChar"""
+
+    If (Type == "HALF_PTR")
+        Return "(A_PtrSize=8) ? ""Int"" : ""Short"""
+
+    If (Type == "UHALF_PTR")
+        Return "(A_PtrSize=8) ? ""UInt"" : ""UShort"""
 
     If (SubStr(DataType, 1, 2) == "LP" || SubStr(Member, 1, 2) == "lp") {
         Return "Ptr"
@@ -710,7 +749,7 @@ LoadSettings:
     IniRead PausePrompt, %IniFile%, Settings, PausePrompt, 0
     IniRead ChkNumGet, %IniFile%, Settings, NumGet, 1
     IniRead ChkNumPut, %IniFile%, Settings, NumPut, 1
-    IniRead ShortTernary, %IniFile%, Settings, ShortTernary, 0
+    IniRead ShortTernary, %IniFile%, Settings, ShortTernary, 1
 
     IniRead CompilerPath32, %IniFile%, Compiler, CompilerPath32, %A_Space%
     IniRead BatchFile32, %IniFile%, Compiler, BatchFile32, %A_Space%

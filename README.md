@@ -70,6 +70,34 @@
   
   
   
+## 功能5：批量模式。  
+  
+例如我们想知道，DWORD WORD HANDLE 3种类型的大小时。  
+  
+新建一个文本文档，每行写一种类型，像这样。  
+  
+```
+WORD
+DWORD
+HANDLE
+```
+  
+![](https://raw.githubusercontent.com/telppa/Structor/main/Img/9.png)  
+  
+同理，也可以批量获取成员偏移量和常量值。  
+  
+  
+  
+## 更新日志  
+#### 2022.04.18
+* 修复了原版数个 BUG 。
+* 打包了编译器和 SDK 。
+* 增强了类型识别功能。
+* 实现了工具便携性。
+* 版本号 1.2.1 。
+  
+  
+  
 ## 下载地址  
   
 [Github Releases](https://github.com/telppa/Structor/releases)
